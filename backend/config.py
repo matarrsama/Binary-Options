@@ -21,7 +21,7 @@ class Config:
     
     # Application Configuration
     UPDATE_THROTTLE_SECONDS = float(os.getenv('UPDATE_THROTTLE_SECONDS', '1.0'))
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
     HEALTH_CHECK_PORT = int(os.getenv('HEALTH_CHECK_PORT', '8080'))
     
     # Reconnection Configuration
