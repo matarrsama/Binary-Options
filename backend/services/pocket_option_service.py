@@ -75,11 +75,6 @@ class PocketOptionService:
             
             # Re-subscribe to ensure we're getting data on the authenticated session
             await self.subscribe_to_markets()
-        
-        # generic error handler
-        @self.client.on.error
-        async def on_error(data):
-            logger.error(f"❌ WebSocket Error: {data}")
 
         @self.client.on.disconnect
         async def on_disconnect(data):
