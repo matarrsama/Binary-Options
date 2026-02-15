@@ -46,13 +46,12 @@ class PocketOptionService:
             # Authenticate with SSID
             try:
                 logger.info("Attempting authentication...")
-                # Extract UID from SSID if needed (you may need to adjust this)
-                # For now, using a placeholder - you'll need to get the actual UID
+                logger.info(f"Using UID: {Config.POCKET_OPTION_UID}")
                 await self.client.emit.auth(
                     AuthorizationData.model_validate({
                         "session": Config.POCKET_OPTION_SSID,
                         "isDemo": 1,  # Use demo account
-                        "uid": 0,  # This needs to be extracted from your account
+                        "uid": Config.POCKET_OPTION_UID,
                         "platform": 2,
                         "isFastHistory": True,
                         "isOptimized": True,
