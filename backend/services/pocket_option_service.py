@@ -42,51 +42,65 @@ class PocketOptionService:
             """Handle connection event"""
             logger.info("WebSocket connected")
             self.is_connected = True
+            
             # Authenticate with SSID
             try:
-                logger.info("Attempting authentication...")
-                logger.info(f"Using UID: {Config.POCKET_OPTION_UID}, isDemo: {Config.POCKET_OPTION_IS_DEMO}")
+                # Log raw env var to see why it might be sticky
+                raw_demo_env = os.getenv('POCKET_OPTION_IS_DEMO')
+                logger.info(f"DEBUG ENV: POCKET_OPTION_IS_DEMO='{raw_demo_env}'")
+                logger.info(f"Config says isDemo: {Config.POCKET_OPTION_IS_DEMO}")
                 
                 auth_data = {
                     "session": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                     "uid": Config.POCKET_OPTION_UID,
-                    "platform": 2,
+                    "platform": 2, 
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
                 
                 await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
-                logger.info("Authentication request sent")
+                logger.info(f"Authentication request emitted: UID={auth_data['uid']} (isDemo={auth_data['isDemo']})")
                 
-                # Proactively subscribe to markets after sending auth, just in case success_auth event is missed
+                # Proactively subscribe to markets after sending auth
                 logger.info("Proactively starting market subscriptions...")
                 await self.subscribe_to_markets()
-                
             except Exception as e:
                 logger.error(f"Authentication flow error: {e}", exc_info=True)
         
+        # Try to hook into the underlying Socket.IO client if possible
+        try:
+            # The library usually uses a socketio.AsyncClient internally
+            # We'll try to find it and register a catch-all
+            sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
+            if sio:
+                @sio.on('*')
+                async def catch_all(event, data):
+                    if event not in ['updateAssets', 'update_assets']:
+                        logger.info(f"⚡️ [RAW SIO EVENT]: {event}")
+                        logger.debug(f"   Data: {str(data)[:500]}")
+                logger.info("✅ Hooked into underlying Socket.IO client for raw event capture")
+            else:
+                logger.warning("⚠️ Could not find underlying socketio client for raw capture")
+        except Exception as e:
+            logger.warning(f"Could not register raw socketio hook: {e}")
+
+        # Register common variations of auth success events just in case
         @self.client.on.success_auth
         async def on_success_auth(data: SuccessAuthEvent):
-            """Handle successful authentication"""
             logger.info("🎉 SUCCESS_AUTH EVENT RECEIVED")
-            logger.info(f"Successfully authenticated with ID: {data.id}")
-            self.reconnect_attempts = 0
+            await self.subscribe_to_markets()
             
-            # Re-subscribe to ensure we're getting data on the authenticated session
+        @self.client.on.authenticated # trial/error handler
+        async def on_authenticated(data):
+            logger.info(f"🎉 AUTHENTICATED EVENT RECEIVED: {data}")
             await self.subscribe_to_markets()
 
-        @self.client.on.disconnect
-        async def on_disconnect(data):
-            """Handle disconnection"""
-            logger.warning(f"⚠️ WebSocket disconnected. Data: {data}")
-            self.is_connected = False
-            await self._handle_reconnection()
-        
         @self.client.on.update_close_value
         async def on_update_close_value(assets: list[UpdateCloseValueItem]):
             """Handle real-time price updates"""
             logger.info(f"📊 RECEIVED PRICE UPDATE: {len(assets)} assets")
+            # ... rest of the handler ...
             if self.on_market_data and assets:
                 for asset in assets:
                     try:
