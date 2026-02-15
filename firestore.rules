@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "pairs": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}

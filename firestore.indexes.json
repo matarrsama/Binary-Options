@@ -1,0 +1,32 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "pairs",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "category",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "name",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "pairs",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "category",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "lastUpdate",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ]
+}
