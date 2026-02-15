@@ -94,22 +94,6 @@ class PocketOptionService:
                     }
                     logger.info(f"Processing market data for {asset_id}: price={asset.value}")
                     await self.on_market_data(data)
-        
-        # Add handlers for other common events to see what we're receiving
-        @self.client.on.candles
-        async def on_candles(data):
-            logger.info(f"🕯️ Received candles event: {type(data)}")
-            logger.debug(f"Candles data: {data}")
-        
-        @self.client.on.update_actives
-        async def on_update_actives(data):
-            logger.info(f"📈 Received update_actives event")
-            logger.debug(f"Actives data: {data}")
-        
-        @self.client.on.message
-        async def on_message(data):
-            logger.info(f"📧 Received message event")
-            logger.debug(f"Message data: {data}")
     
     async def connect(self):
         """Connect to Pocket Option WebSocket"""
