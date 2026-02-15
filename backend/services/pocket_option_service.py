@@ -76,66 +76,55 @@ class PocketOptionService:
             # Re-subscribe to ensure we're getting data on the authenticated session
             await self.subscribe_to_markets()
         
+        # generic error handler
+        @self.client.on.error
+        async def on_error(data):
+            logger.error(f"❌ WebSocket Error: {data}")
+
         @self.client.on.disconnect
         async def on_disconnect(data):
             """Handle disconnection"""
-            logger.warning("WebSocket disconnected")
+            logger.warning(f"⚠️ WebSocket disconnected. Data: {data}")
             self.is_connected = False
             await self._handle_reconnection()
         
         @self.client.on.update_close_value
         async def on_update_close_value(assets: list[UpdateCloseValueItem]):
             """Handle real-time price updates"""
-            logger.info(f"📊 Received update_close_value event with {len(assets)} assets")
+            logger.info(f"📊 RECEIVED PRICE UPDATE: {len(assets)} assets")
             if self.on_market_data and assets:
-                # Convert to our format
                 for asset in assets:
-                    asset_id = asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset)
-                    data = {
-                        'id': asset_id,
-                        'name': asset_id,
-                        'price': asset.value,
-                        'payout': getattr(asset, 'payout', 0),
-                        'is_open': True,
-                    }
-                    logger.info(f"Processing market data for {asset_id}: price={asset.value}")
-                    await self.on_market_data(data)
+                    try:
+                        # Improved ID extraction
+                        asset_id = str(asset.asset.value) if hasattr(asset.asset, 'value') else str(asset.asset)
+                        data = {
+                            'id': asset_id,
+                            'name': asset_id,
+                            'price': asset.value,
+                            'payout': getattr(asset, 'payout', 0),
+                            'is_open': True,
+                        }
+                        logger.debug(f"💰 Price Update: {asset_id} = {asset.value}")
+                        await self.on_market_data(data)
+                    except Exception as e:
+                        logger.error(f"Error processing asset update: {e}")
         
-        # update_assets event provides asset metadata (payouts, timeframes, etc.)
-        # NOT price data - we still need update_close_value for prices
         @self.client.on.update_assets
         async def on_update_assets(assets):
-            """Handle asset metadata updates from Pocket Option"""
-            logger.debug(f"📋 Received {len(assets)} asset metadata updates")
-            # This event is for metadata only, not price data
-            # We're keeping this handler for potential future use
+            """Handle asset metadata updates"""
+            logger.info(f"📋 Received {len(assets)} asset metadata updates")
         
         # Try to add a generic event logger to see ALL events
-        # This MUST be registered LAST to avoid interfering with other handlers
         try:
-            # Store original handler if it exists
-            original_any_handler = getattr(self.client.on, '_any_handler', None)
-            
             async def on_any_event(event_name, *args, **kwargs):
-                """Log all events to help debug - CRITICAL for finding auth issues"""
-                # Filter out noisy events
-                if event_name not in ['updateAssets', 'update_assets']:
-                    logger.info(f"🔔 EVENT RECEIVED: '{event_name}'")
-                    if args and len(args) > 0:
-                        # Log first 500 chars of data
-                        data_preview = str(args[0])[:500]
-                        logger.debug(f"   Event '{event_name}' data: {data_preview}")
-                
-                # Call original handler if it existed
-                if original_any_handler:
-                    return await original_any_handler(event_name, *args, **kwargs)
+                """Log ALL events - NO FILTERS"""
+                logger.info(f"🔔 RAW EVENT: '{event_name}'")
+                if args:
+                    logger.debug(f"   Data: {str(args[0])[:1000]}")
             
-            # Try to register the any handler
             if hasattr(self.client.on, 'any'):
                 self.client.on.any(on_any_event)
-                logger.info("✅ Registered 'any' event handler for debugging")
-            else:
-                logger.warning("⚠️ 'any' event handler not supported by library")
+                logger.info("✅ Registered 'any' event handler (Aggressive)")
         except Exception as e:
             logger.warning(f"Could not register 'any' event handler: {e}")
 
@@ -161,8 +150,10 @@ class PocketOptionService:
                 logger.warning("Cannot subscribe: not connected")
                 return
             
+            # Wait a moment for auth to be processed on server side
+            await asyncio.sleep(2)
+            
             # Map of common asset names to Asset enum values
-            # Using OTC versions for better availability
             asset_mapping = {
                 "EURUSD_otc": Asset.EURUSD_otc,
                 "GBPUSD_otc": Asset.GBPUSD_otc,
@@ -180,14 +171,18 @@ class PocketOptionService:
             
             for asset_name, asset_enum in asset_mapping.items():
                 try:
-                    # Subscribe to asset updates using the correct API
+                    # Attempt subscription using the raw value (string) as well as the enum
+                    # Some versions of the API/library prefer strings
+                    asset_value = asset_enum.value if hasattr(asset_enum, 'value') else str(asset_enum)
+                    
+                    logger.info(f"Attempting subscription to {asset_name} (value: {asset_value})")
                     await self.client.emit.subscribe_to_asset(asset_enum)
                     self.subscribed_assets.add(asset_name)
                     logger.info(f"✅ Subscribed to {asset_name}")
                 except Exception as e:
                     logger.warning(f"❌ Failed to subscribe to {asset_name}: {e}")
             
-            logger.info(f"Successfully subscribed to {len(self.subscribed_assets)} market pairs")
+            logger.info(f"Successfully initiated subscription for {len(self.subscribed_assets)} market pairs")
             
         except Exception as e:
             logger.error(f"Failed to subscribe to markets: {e}")
