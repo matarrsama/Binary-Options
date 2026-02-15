@@ -90,11 +90,6 @@ class PocketOptionService:
         async def on_success_auth(data: SuccessAuthEvent):
             logger.info("🎉 SUCCESS_AUTH EVENT RECEIVED")
             await self.subscribe_to_markets()
-            
-        @self.client.on.authenticated # trial/error handler
-        async def on_authenticated(data):
-            logger.info(f"🎉 AUTHENTICATED EVENT RECEIVED: {data}")
-            await self.subscribe_to_markets()
 
         @self.client.on.update_close_value
         async def on_update_close_value(assets: list[UpdateCloseValueItem]):
