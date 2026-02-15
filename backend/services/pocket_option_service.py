@@ -42,36 +42,39 @@ class PocketOptionService:
             """Handle connection event"""
             logger.info("WebSocket connected")
             self.is_connected = True
-            
             # Authenticate with SSID
             try:
                 logger.info("Attempting authentication...")
-                logger.info(f"Using UID: {Config.POCKET_OPTION_UID}")
-                await self.client.emit.auth(
-                    AuthorizationData.model_validate({
-                        "session": Config.POCKET_OPTION_SSID,
-                        "isDemo": 1,  # Use demo account
-                        "uid": Config.POCKET_OPTION_UID,
-                        "platform": 2,
-                        "isFastHistory": True,
-                        "isOptimized": True,
-                    })
-                )
+                logger.info(f"Using UID: {Config.POCKET_OPTION_UID}, isDemo: {Config.POCKET_OPTION_IS_DEMO}")
+                
+                auth_data = {
+                    "session": Config.POCKET_OPTION_SSID,
+                    "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
+                    "uid": Config.POCKET_OPTION_UID,
+                    "platform": 2,
+                    "isFastHistory": True,
+                    "isOptimized": True,
+                }
+                
+                await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
                 logger.info("Authentication request sent")
+                
+                # Proactively subscribe to markets after sending auth, just in case success_auth event is missed
+                logger.info("Proactively starting market subscriptions...")
+                await self.subscribe_to_markets()
+                
             except Exception as e:
-                logger.error(f"Authentication failed: {e}", exc_info=True)
+                logger.error(f"Authentication flow error: {e}", exc_info=True)
         
         @self.client.on.success_auth
         async def on_success_auth(data: SuccessAuthEvent):
             """Handle successful authentication"""
-            logger.info(f"✅ Successfully authenticated with ID: {data.id}")
-            logger.info(f"Auth data: {data}")
+            logger.info("🎉 SUCCESS_AUTH EVENT RECEIVED")
+            logger.info(f"Successfully authenticated with ID: {data.id}")
             self.reconnect_attempts = 0
             
-            # Subscribe to all available assets AFTER successful authentication
-            logger.info("Starting market subscriptions...")
+            # Re-subscribe to ensure we're getting data on the authenticated session
             await self.subscribe_to_markets()
-            logger.info("Market subscriptions completed")
         
         @self.client.on.disconnect
         async def on_disconnect(data):
