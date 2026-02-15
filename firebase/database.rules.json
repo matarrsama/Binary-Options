@@ -1,0 +1,32 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": false,
+    "pairs": {
+      "$pair": {
+        ".read": true,
+        ".write": false,
+        "price": {
+          ".read": true,
+          ".write": false
+        },
+        "payout": {
+          ".read": true,
+          ".write": false
+        },
+        "timestamp": {
+          ".read": true,
+          ".write": false
+        },
+        "lastUpdate": {
+          ".read": true,
+          ".write": false
+        }
+      }
+    },
+    "metadata": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}

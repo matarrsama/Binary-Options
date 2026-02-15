@@ -1,0 +1,13 @@
+{
+  "name": "pocket-option-netlify-functions",
+  "version": "1.0.0",
+  "description": "Netlify Functions for Pocket Option app",
+  "main": "netlify/functions/api.js",
+  "dependencies": {
+    "@netlify/functions": "^1.6.0",
+    "axios": "^1.6.0"
+  },
+  "keywords": ["netlify", "functions", "serverless"],
+  "author": "",
+  "license": "MIT"
+}
