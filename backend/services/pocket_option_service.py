@@ -45,6 +45,7 @@ class PocketOptionService:
             
             # Authenticate with SSID
             try:
+                logger.info("Attempting authentication...")
                 # Extract UID from SSID if needed (you may need to adjust this)
                 # For now, using a placeholder - you'll need to get the actual UID
                 await self.client.emit.auth(
@@ -57,8 +58,9 @@ class PocketOptionService:
                         "isOptimized": True,
                     })
                 )
+                logger.info("Authentication request sent")
             except Exception as e:
-                logger.error(f"Authentication failed: {e}")
+                logger.error(f"Authentication failed: {e}", exc_info=True)
         
         @self.client.on.success_auth
         async def on_success_auth(data: SuccessAuthEvent):
@@ -67,8 +69,17 @@ class PocketOptionService:
             logger.info(f"Auth data: {data}")
             self.reconnect_attempts = 0
             
-            # Subscribe to all available assets
+            # Subscribe to all available assets AFTER successful authentication
+            logger.info("Starting market subscriptions...")
             await self.subscribe_to_markets()
+            logger.info("Market subscriptions completed")
+        
+        # Add handler for failed authentication
+        @self.client.on.error
+        async def on_error(error):
+            """Handle WebSocket errors"""
+            logger.error(f"❌ WebSocket error: {error}")
+
         
         @self.client.on.disconnect
         async def on_disconnect(data):
