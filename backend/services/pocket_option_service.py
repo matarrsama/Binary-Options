@@ -109,16 +109,34 @@ class PocketOptionService:
             # We're keeping this handler for potential future use
         
         # Try to add a generic event logger to see ALL events
+        # This MUST be registered LAST to avoid interfering with other handlers
         try:
-            @self.client.on.any
+            # Store original handler if it exists
+            original_any_handler = getattr(self.client.on, '_any_handler', None)
+            
             async def on_any_event(event_name, *args, **kwargs):
-                """Log all events to help debug"""
+                """Log all events to help debug - CRITICAL for finding auth issues"""
+                # Filter out noisy events
                 if event_name not in ['updateAssets', 'update_assets']:
-                    logger.info(f"� Received event: {event_name} with {len(args)} args")
-                    if args:
-                        logger.debug(f"   Event data preview: {str(args[0])[:200] if args else 'None'}")
-        except AttributeError:
-            logger.warning("Could not register 'any' event handler - not supported by library")
+                    logger.info(f"🔔 EVENT RECEIVED: '{event_name}'")
+                    if args and len(args) > 0:
+                        # Log first 500 chars of data
+                        data_preview = str(args[0])[:500]
+                        logger.debug(f"   Event '{event_name}' data: {data_preview}")
+                
+                # Call original handler if it existed
+                if original_any_handler:
+                    return await original_any_handler(event_name, *args, **kwargs)
+            
+            # Try to register the any handler
+            if hasattr(self.client.on, 'any'):
+                self.client.on.any(on_any_event)
+                logger.info("✅ Registered 'any' event handler for debugging")
+            else:
+                logger.warning("⚠️ 'any' event handler not supported by library")
+        except Exception as e:
+            logger.warning(f"Could not register 'any' event handler: {e}")
+
     
     async def connect(self):
         """Connect to Pocket Option WebSocket"""
