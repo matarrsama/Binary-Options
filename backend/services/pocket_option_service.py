@@ -74,13 +74,6 @@ class PocketOptionService:
             await self.subscribe_to_markets()
             logger.info("Market subscriptions completed")
         
-        # Add handler for failed authentication
-        @self.client.on.error
-        async def on_error(error):
-            """Handle WebSocket errors"""
-            logger.error(f"❌ WebSocket error: {error}")
-
-        
         @self.client.on.disconnect
         async def on_disconnect(data):
             """Handle disconnection"""
