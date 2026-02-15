@@ -95,9 +95,9 @@ class PocketOptionService:
                     logger.info(f"Processing market data for {asset_id}: price={asset.value}")
                     await self.on_market_data(data)
         
-        # CRITICAL: The actual event is 'updateAssets', not 'update_close_value'
+        # CRITICAL: The actual event is 'update_assets' (snake_case)
         # This handler processes the raw asset data from Pocket Option
-        @self.client.on.updateAssets
+        @self.client.on.update_assets
         async def on_update_assets(data):
             """Handle asset updates from Pocket Option"""
             logger.info(f"🎯 Received updateAssets event with data type: {type(data)}")
