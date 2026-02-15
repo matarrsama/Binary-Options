@@ -95,34 +95,26 @@ class PocketOptionService:
                     logger.info(f"Processing market data for {asset_id}: price={asset.value}")
                     await self.on_market_data(data)
         
-        # CRITICAL: The actual event is 'update_assets' (snake_case)
-        # This handler processes the raw asset data from Pocket Option
+        # update_assets event provides asset metadata (payouts, timeframes, etc.)
+        # NOT price data - we still need update_close_value for prices
         @self.client.on.update_assets
-        async def on_update_assets(data):
-            """Handle asset updates from Pocket Option"""
-            logger.info(f"🎯 Received updateAssets event with data type: {type(data)}")
-            
-            # The data comes as a list of asset arrays
-            # Each asset array contains: [id, symbol, name, type, ?, payout, ...]
-            if self.on_market_data and data:
-                try:
-                    # Parse the asset data - it's a list of lists
-                    for asset_array in data:
-                        if len(asset_array) >= 6:
-                            asset_id = asset_array[1]  # Symbol like "EURUSD_otc"
-                            asset_name = asset_array[2]  # Human-readable name
-                            payout = asset_array[5]  # Payout percentage
-                            
-                            # We need to get the actual price from somewhere
-                            # For now, let's log what we're receiving
-                            logger.info(f"📦 Asset update: {asset_id} ({asset_name}), payout={payout}%")
-                            
-                            # Note: updateAssets gives us asset metadata, not live prices
-                            # We still need update_close_value for actual price updates
-                            
-                except Exception as e:
-                    logger.error(f"Error parsing updateAssets data: {e}")
-                    logger.debug(f"Raw data: {data[:2] if len(data) > 2 else data}")  # Log first 2 items
+        async def on_update_assets(assets):
+            """Handle asset metadata updates from Pocket Option"""
+            logger.debug(f"📋 Received {len(assets)} asset metadata updates")
+            # This event is for metadata only, not price data
+            # We're keeping this handler for potential future use
+        
+        # Try to add a generic event logger to see ALL events
+        try:
+            @self.client.on.any
+            async def on_any_event(event_name, *args, **kwargs):
+                """Log all events to help debug"""
+                if event_name not in ['updateAssets', 'update_assets']:
+                    logger.info(f"� Received event: {event_name} with {len(args)} args")
+                    if args:
+                        logger.debug(f"   Event data preview: {str(args[0])[:200] if args else 'None'}")
+        except AttributeError:
+            logger.warning("Could not register 'any' event handler - not supported by library")
     
     async def connect(self):
         """Connect to Pocket Option WebSocket"""
