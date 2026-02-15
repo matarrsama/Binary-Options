@@ -57,6 +57,8 @@ class DataProcessor:
             data: Raw market data from Pocket Option
         """
         try:
+            logger.info(f"Processing pair update for {pair_id}: price={data.get('price')}")
+            
             # Normalize the data
             normalized_data = self._normalize_data(pair_id, data)
             
@@ -66,10 +68,12 @@ class DataProcessor:
             
             if current_time - last_update >= self.throttle_seconds:
                 # Update immediately
+                logger.info(f"Writing {pair_id} to Firestore immediately")
                 await self.firebase_service.update_pair(pair_id, normalized_data)
                 self.last_update_time[pair_id] = current_time
             else:
                 # Buffer the update
+                logger.debug(f"Buffering update for {pair_id} (throttled)")
                 self.pending_updates[pair_id] = normalized_data
                 
         except Exception as e:

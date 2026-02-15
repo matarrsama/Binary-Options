@@ -53,10 +53,10 @@ class FirebaseService:
             doc_ref = self.db.collection('pairs').document(pair_id)
             doc_ref.set(data, merge=True)
             
-            logger.debug(f"Updated pair {pair_id}: {data.get('price')}")
+            logger.info(f"✅ Successfully wrote {pair_id} to Firestore: price={data.get('price')}, payout={data.get('payout')}%")
             
         except Exception as e:
-            logger.error(f"Failed to update pair {pair_id}: {e}")
+            logger.error(f"❌ Failed to update pair {pair_id} in Firestore: {e}")
     
     async def update_pairs_batch(self, pairs_data: Dict[str, Dict[str, Any]]):
         """

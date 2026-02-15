@@ -7,7 +7,7 @@ import os
 from typing import Optional, Callable
 from pocket_option import PocketOptionClient
 from pocket_option.constants import Regions
-from pocket_option.models import AuthorizationData, SuccessAuthEvent, UpdateCloseValueItem
+from pocket_option.models import AuthorizationData, SuccessAuthEvent, UpdateCloseValueItem, Asset
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -79,16 +79,19 @@ class PocketOptionService:
         @self.client.on.update_close_value
         async def on_update_close_value(assets: list[UpdateCloseValueItem]):
             """Handle real-time price updates"""
+            logger.info(f"Received update_close_value event with {len(assets)} assets")
             if self.on_market_data and assets:
                 # Convert to our format
                 for asset in assets:
+                    asset_id = asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset)
                     data = {
-                        'id': asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset),
-                        'name': asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset),
+                        'id': asset_id,
+                        'name': asset_id,
                         'price': asset.value,
                         'payout': getattr(asset, 'payout', 0),
                         'is_open': True,
                     }
+                    logger.debug(f"Processing market data for {asset_id}: price={asset.value}")
                     await self.on_market_data(data)
     
     async def connect(self):
@@ -112,27 +115,33 @@ class PocketOptionService:
                 logger.warning("Cannot subscribe: not connected")
                 return
             
-            # Common trading pairs to subscribe to
-            common_assets = [
-                "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
-                "EURJPY", "GBPJPY", "EURGBP", "AUDJPY", "NZDUSD",
-                "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD",
-                "GOLD", "SILVER", "OIL"
-            ]
+            # Map of common asset names to Asset enum values
+            # Using OTC versions for better availability
+            asset_mapping = {
+                "EURUSD_otc": Asset.EURUSD_otc,
+                "GBPUSD_otc": Asset.GBPUSD_otc,
+                "USDJPY_otc": Asset.USDJPY_otc,
+                "AUDUSD_otc": Asset.AUDUSD_otc,
+                "USDCAD_otc": Asset.USDCAD_otc,
+                "EURJPY_otc": Asset.EURJPY_otc,
+                "GBPJPY_otc": Asset.GBPJPY_otc,
+                "EURGBP_otc": Asset.EURGBP_otc,
+                "AUDJPY_otc": Asset.AUDJPY_otc,
+                "NZDUSD_otc": Asset.NZDUSD_otc,
+            }
             
-            logger.info(f"Subscribing to {len(common_assets)} market pairs...")
+            logger.info(f"Subscribing to {len(asset_mapping)} market pairs...")
             
-            for asset_name in common_assets:
+            for asset_name, asset_enum in asset_mapping.items():
                 try:
-                    # Subscribe to asset updates
-                    # Note: The exact method may vary based on the API
-                    # You may need to use client.emit.subscribe_to_asset(asset)
+                    # Subscribe to asset updates using the correct API
+                    await self.client.emit.subscribe_to_asset(asset_enum)
                     self.subscribed_assets.add(asset_name)
-                    logger.debug(f"Subscribed to {asset_name}")
+                    logger.info(f"✅ Subscribed to {asset_name}")
                 except Exception as e:
-                    logger.warning(f"Failed to subscribe to {asset_name}: {e}")
+                    logger.warning(f"❌ Failed to subscribe to {asset_name}: {e}")
             
-            logger.info(f"Subscribed to {len(self.subscribed_assets)} market pairs")
+            logger.info(f"Successfully subscribed to {len(self.subscribed_assets)} market pairs")
             
         except Exception as e:
             logger.error(f"Failed to subscribe to markets: {e}")
