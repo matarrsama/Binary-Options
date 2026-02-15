@@ -15,7 +15,9 @@ class Config:
     # Pocket Option Configuration
     POCKET_OPTION_SSID = os.getenv('POCKET_OPTION_SSID')
     POCKET_OPTION_UID = int(os.getenv('POCKET_OPTION_UID', '0'))
-    POCKET_OPTION_IS_DEMO = os.getenv('POCKET_OPTION_IS_DEMO', '1') == '1'
+    # Log raw value for diagnostics
+    _raw_is_demo = os.getenv('POCKET_OPTION_IS_DEMO', '1')
+    POCKET_OPTION_IS_DEMO = _raw_is_demo.lower() in ('1', 'true', 'yes')
     
     # Firebase Configuration
     FIREBASE_PROJECT_ID = os.getenv('FIREBASE_PROJECT_ID', 'binary-fc0fb')

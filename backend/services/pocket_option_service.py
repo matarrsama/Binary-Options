@@ -34,21 +34,43 @@ class PocketOptionService:
         # Set up event handlers
         self._setup_event_handlers()
     
+    async def connect(self):
+        """Connect to Pocket Option WebSocket"""
+        if self.is_connected:
+            logger.info("Already connected, skipping...")
+            return
+            
+        try:
+            logger.info("Connecting to Pocket Option...")
+            # Use demo region for all connections, auth determines account type
+            await self.client.connect(Regions.DEMO)
+            logger.info("WebSocket connection handshake initiated")
+        except Exception as e:
+            logger.error(f"Failed to initiate Pocket Option connection: {e}")
+            await self._handle_reconnection()
+
     def _setup_event_handlers(self):
         """Set up event handlers for WebSocket events"""
         
+        # Track if we've already sent auth for this connection
+        self._auth_sent = False
+
         @self.client.on.connect
         async def on_connect(data: None):
             """Handle connection event"""
-            logger.info("WebSocket connected")
+            if self._auth_sent:
+                logger.info("🔄 Duplicate connect event - ignoring to prevent auth storm")
+                return
+                
+            logger.info("✅ WebSocket connected - Authenticating...")
             self.is_connected = True
+            self._auth_sent = True
             
-            # Authenticate with SSID
             try:
-                # Log raw env var to see why it might be sticky
+                # Log state for debugging
                 raw_demo_env = os.getenv('POCKET_OPTION_IS_DEMO')
-                logger.info(f"DEBUG ENV: POCKET_OPTION_IS_DEMO='{raw_demo_env}'")
-                logger.info(f"Config says isDemo: {Config.POCKET_OPTION_IS_DEMO}")
+                logger.info(f"DEBUG: POCKET_OPTION_IS_DEMO='{raw_demo_env}'")
+                logger.info(f"Config isDemo: {Config.POCKET_OPTION_IS_DEMO}")
                 
                 auth_data = {
                     "session": Config.POCKET_OPTION_SSID,
@@ -60,93 +82,60 @@ class PocketOptionService:
                 }
                 
                 await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
-                logger.info(f"Authentication request emitted: UID={auth_data['uid']} (isDemo={auth_data['isDemo']})")
-                
-                # Proactively subscribe to markets after sending auth
-                logger.info("Proactively starting market subscriptions...")
-                await self.subscribe_to_markets()
+                logger.info(f"🚀 Auth request emitted (UID={auth_data['uid']}, isDemo={auth_data['isDemo']})")
             except Exception as e:
-                logger.error(f"Authentication flow error: {e}", exc_info=True)
+                logger.error(f"❌ Auth mission failed: {e}")
+                self._auth_sent = False # allow retry
         
-        # Try to hook into the underlying Socket.IO client if possible
+        # Hook underlying Socket.IO for raw diagnostics
         try:
-            # The library usually uses a socketio.AsyncClient internally
-            # We'll try to find it and register a catch-all
             sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
             if sio:
                 @sio.on('*')
                 async def catch_all(event, data):
-                    if event not in ['updateAssets', 'update_assets']:
-                        logger.info(f"⚡️ [RAW SIO EVENT]: {event}")
-                        logger.debug(f"   Data: {str(data)[:500]}")
-                logger.info("✅ Hooked into underlying Socket.IO client for raw event capture")
-            else:
-                logger.warning("⚠️ Could not find underlying socketio client for raw capture")
-        except Exception as e:
-            logger.warning(f"Could not register raw socketio hook: {e}")
+                    if event not in ['updateAssets', 'update_assets', 'connect', 'disconnect']:
+                        logger.info(f"🔔 RAW SIO: '{event}' | Data: {str(data)[:200]}")
+        except Exception: pass
 
-        # Register common variations of auth success events just in case
         @self.client.on.success_auth
         async def on_success_auth(data: SuccessAuthEvent):
-            logger.info("🎉 SUCCESS_AUTH EVENT RECEIVED")
+            """Handle successful authentication"""
+            logger.info(f"🎉 AUTH SUCCESS! ID: {data.id}")
+            self.reconnect_attempts = 0
+            # Subscribe ONLY after auth is confirmed
             await self.subscribe_to_markets()
 
         @self.client.on.update_close_value
         async def on_update_close_value(assets: list[UpdateCloseValueItem]):
             """Handle real-time price updates"""
-            logger.info(f"📊 RECEIVED PRICE UPDATE: {len(assets)} assets")
-            # ... rest of the handler ...
-            if self.on_market_data and assets:
+            logger.info(f"📊 PRICE DATA: {len(assets)} items")
+            if self.on_market_data:
                 for asset in assets:
                     try:
-                        # Improved ID extraction
                         asset_id = str(asset.asset.value) if hasattr(asset.asset, 'value') else str(asset.asset)
-                        data = {
+                        await self.on_market_data({
                             'id': asset_id,
                             'name': asset_id,
                             'price': asset.value,
                             'payout': getattr(asset, 'payout', 0),
                             'is_open': True,
-                        }
-                        logger.debug(f"💰 Price Update: {asset_id} = {asset.value}")
-                        await self.on_market_data(data)
-                    except Exception as e:
-                        logger.error(f"Error processing asset update: {e}")
-        
+                        })
+                    except Exception: pass
+
         @self.client.on.update_assets
         async def on_update_assets(assets):
             """Handle asset metadata updates"""
-            logger.info(f"📋 Received {len(assets)} asset metadata updates")
-        
-        # Try to add a generic event logger to see ALL events
-        try:
-            async def on_any_event(event_name, *args, **kwargs):
-                """Log ALL events - NO FILTERS"""
-                logger.info(f"🔔 RAW EVENT: '{event_name}'")
-                if args:
-                    logger.debug(f"   Data: {str(args[0])[:1000]}")
-            
-            if hasattr(self.client.on, 'any'):
-                self.client.on.any(on_any_event)
-                logger.info("✅ Registered 'any' event handler (Aggressive)")
-        except Exception as e:
-            logger.warning(f"Could not register 'any' event handler: {e}")
+            logger.debug(f"📋 Metadata received: {len(assets)} assets")
 
-    
-    async def connect(self):
-        """Connect to Pocket Option WebSocket"""
-        try:
-            logger.info("Connecting to Pocket Option...")
-            
-            # Connect to WebSocket (using demo region)
-            await self.client.connect(Regions.DEMO)
-            
-            logger.info("Connection initiated")
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to Pocket Option: {e}")
+        @self.client.on.disconnect
+        async def on_disconnect(data):
+            """Handle disconnection"""
+            logger.warning(f"⚠️ DISCONNECTED. Data: {data}")
+            self.is_connected = False
+            self._auth_sent = False
+            self.subscribed_assets.clear()
             await self._handle_reconnection()
-    
+
     async def subscribe_to_markets(self):
         """Subscribe to all available market pairs"""
         try:
