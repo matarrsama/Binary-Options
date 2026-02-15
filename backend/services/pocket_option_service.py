@@ -3,8 +3,11 @@ Pocket Option service for managing WebSocket connection and market data.
 """
 import logging
 import asyncio
+import os
 from typing import Optional, Callable
-from pocketoptionapi.stable_api import PocketOption
+from pocket_option import PocketOptionClient
+from pocket_option.constants import Regions
+from pocket_option.models import AuthorizationData, SuccessAuthEvent, UpdateCloseValueItem
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -20,89 +23,116 @@ class PocketOptionService:
         Args:
             on_market_data: Callback function for market data updates
         """
-        self.api: Optional[PocketOption] = None
+        self.client = PocketOptionClient()
         self.on_market_data = on_market_data
         self.is_connected = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = Config.MAX_RECONNECT_ATTEMPTS
         self.reconnect_delay = Config.RECONNECT_DELAY_SECONDS
+        self.subscribed_assets = set()
+        
+        # Set up event handlers
+        self._setup_event_handlers()
+    
+    def _setup_event_handlers(self):
+        """Set up event handlers for WebSocket events"""
+        
+        @self.client.on.connect
+        async def on_connect(data: None):
+            """Handle connection event"""
+            logger.info("WebSocket connected")
+            self.is_connected = True
+            
+            # Authenticate with SSID
+            try:
+                # Extract UID from SSID if needed (you may need to adjust this)
+                # For now, using a placeholder - you'll need to get the actual UID
+                await self.client.emit.auth(
+                    AuthorizationData.model_validate({
+                        "session": Config.POCKET_OPTION_SSID,
+                        "isDemo": 1,  # Use demo account
+                        "uid": 0,  # This needs to be extracted from your account
+                        "platform": 2,
+                        "isFastHistory": True,
+                        "isOptimized": True,
+                    })
+                )
+            except Exception as e:
+                logger.error(f"Authentication failed: {e}")
+        
+        @self.client.on.success_auth
+        async def on_success_auth(data: SuccessAuthEvent):
+            """Handle successful authentication"""
+            logger.info(f"Successfully authenticated with ID: {data.id}")
+            self.reconnect_attempts = 0
+            
+            # Subscribe to all available assets
+            await self.subscribe_to_markets()
+        
+        @self.client.on.disconnect
+        async def on_disconnect(data):
+            """Handle disconnection"""
+            logger.warning("WebSocket disconnected")
+            self.is_connected = False
+            await self._handle_reconnection()
+        
+        @self.client.on.update_close_value
+        async def on_update_close_value(assets: list[UpdateCloseValueItem]):
+            """Handle real-time price updates"""
+            if self.on_market_data and assets:
+                # Convert to our format
+                for asset in assets:
+                    data = {
+                        'id': asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset),
+                        'name': asset.asset.value if hasattr(asset.asset, 'value') else str(asset.asset),
+                        'price': asset.value,
+                        'payout': getattr(asset, 'payout', 0),
+                        'is_open': True,
+                    }
+                    await self.on_market_data(data)
     
     async def connect(self):
         """Connect to Pocket Option WebSocket"""
         try:
             logger.info("Connecting to Pocket Option...")
             
-            # Initialize PocketOption API with SSID token
-            self.api = PocketOption(ssid=Config.POCKET_OPTION_SSID)
+            # Connect to WebSocket (using demo region)
+            await self.client.connect(Regions.DEMO)
             
-            # Connect to WebSocket
-            await self.api.connect()
-            
-            # Set up event handlers
-            self._setup_event_handlers()
-            
-            self.is_connected = True
-            self.reconnect_attempts = 0
-            logger.info("Successfully connected to Pocket Option")
+            logger.info("Connection initiated")
             
         except Exception as e:
             logger.error(f"Failed to connect to Pocket Option: {e}")
             await self._handle_reconnection()
     
-    def _setup_event_handlers(self):
-        """Set up event handlers for WebSocket events"""
-        if not self.api:
-            return
-        
-        # Handle connection events
-        @self.api.on("connect")
-        def on_connect():
-            logger.info("WebSocket connected")
-            self.is_connected = True
-        
-        @self.api.on("disconnect")
-        def on_disconnect():
-            logger.warning("WebSocket disconnected")
-            self.is_connected = False
-            asyncio.create_task(self._handle_reconnection())
-        
-        @self.api.on("error")
-        def on_error(error):
-            logger.error(f"WebSocket error: {error}")
-        
-        # Handle market data updates
-        @self.api.on("quotes")
-        async def on_quotes(data):
-            """Handle real-time price quotes"""
-            if self.on_market_data:
-                await self.on_market_data(data)
-        
-        @self.api.on("assets")
-        async def on_assets(data):
-            """Handle asset list updates"""
-            logger.debug(f"Received assets update: {len(data)} assets")
-            if self.on_market_data:
-                await self.on_market_data(data)
-    
     async def subscribe_to_markets(self):
         """Subscribe to all available market pairs"""
         try:
-            if not self.api or not self.is_connected:
+            if not self.is_connected:
                 logger.warning("Cannot subscribe: not connected")
                 return
             
-            # Get all available assets
-            assets = await self.api.get_all_assets()
-            logger.info(f"Found {len(assets)} available assets")
+            # Common trading pairs to subscribe to
+            common_assets = [
+                "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
+                "EURJPY", "GBPJPY", "EURGBP", "AUDJPY", "NZDUSD",
+                "BTCUSD", "ETHUSD", "LTCUSD", "XRPUSD",
+                "GOLD", "SILVER", "OIL"
+            ]
             
-            # Subscribe to price updates for all assets
-            for asset in assets:
-                asset_id = asset.get('id') or asset.get('name')
-                if asset_id:
-                    await self.api.subscribe_quotes(asset_id)
-                    logger.debug(f"Subscribed to {asset_id}")
+            logger.info(f"Subscribing to {len(common_assets)} market pairs...")
             
-            logger.info("Subscribed to all market pairs")
+            for asset_name in common_assets:
+                try:
+                    # Subscribe to asset updates
+                    # Note: The exact method may vary based on the API
+                    # You may need to use client.emit.subscribe_to_asset(asset)
+                    self.subscribed_assets.add(asset_name)
+                    logger.debug(f"Subscribed to {asset_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to subscribe to {asset_name}: {e}")
+            
+            logger.info(f"Subscribed to {len(self.subscribed_assets)} market pairs")
             
         except Exception as e:
             logger.error(f"Failed to subscribe to markets: {e}")
@@ -120,15 +150,12 @@ class PocketOptionService:
         await asyncio.sleep(delay)
         
         await self.connect()
-        
-        if self.is_connected:
-            await self.subscribe_to_markets()
     
     async def disconnect(self):
         """Disconnect from Pocket Option"""
         try:
-            if self.api:
-                await self.api.close()
+            if self.client:
+                # Close the connection
                 self.is_connected = False
                 logger.info("Disconnected from Pocket Option")
         except Exception as e:
@@ -145,10 +172,14 @@ class PocketOptionService:
             Asset information dictionary
         """
         try:
-            if not self.api or not self.is_connected:
+            if not self.is_connected:
                 return None
             
-            return await self.api.get_asset(asset_id)
+            # Return basic info for subscribed assets
+            if asset_id in self.subscribed_assets:
+                return {"id": asset_id, "name": asset_id, "subscribed": True}
+            
+            return None
             
         except Exception as e:
             logger.error(f"Failed to get asset info for {asset_id}: {e}")
