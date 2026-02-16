@@ -56,17 +56,17 @@ class PocketOptionService:
                 "session": Config.POCKET_OPTION_SSID,
                 "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                 "uid": Config.POCKET_OPTION_UID,
-                "platform": 1, # Switched to 1 (older but stable API platform ID)
+                "platform": 2, # Reverting to 2 (Standard Web) for V4
                 "isFastHistory": True,
                 "isOptimized": True,
             }
             
-            # VERSION STAMP: 2026-02-16-v3 (Handshake + Post-Connect Fallback)
+            # VERSION STAMP: 2026-02-16-v4 (Handshake + Post-Connect + Platform 2)
             auth_model = AuthorizationData.model_validate(auth_data)
             auth_dict = auth_model.model_dump(mode='json', by_alias=True)
             
             await self.client.connect(url=region, auth=auth_dict)
-            logger.info(f"✅ WebSocket handshake initiated (Platform 1, isDemo={Config.POCKET_OPTION_IS_DEMO})")
+            logger.info(f"✅ WebSocket handshake initiated (Platform 2, isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -84,13 +84,13 @@ class PocketOptionService:
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
-            # Fallback: Emitting auth manually after connect just in case handshake auth was ignored
+            # Fallback: Emitting auth manually after connect
             try:
                 auth_data = {
                     "session": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                     "uid": Config.POCKET_OPTION_UID,
-                    "platform": 1,
+                    "platform": 2, # Match handshake platform
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
@@ -99,14 +99,25 @@ class PocketOptionService:
             except Exception as e:
                 logger.error(f"❌ Manual auth fallback failed: {e}")
 
-        # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V3
+        # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V4
         try:
+            import json as json_lib
             sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
             if sio:
                 @sio.on('*')
                 async def catch_all(event, data):
-                    # Show EVERYTHING to identify hidden protocol messages
-                    logger.info(f"🔔 RAW SIO: '{event}' | Data: {str(data)[:500]}")
+                    # Robust data handling for bytes vs dict
+                    decoded_data = data
+                    if isinstance(data, (bytes, bytearray)):
+                        try: decoded_data = json_lib.loads(data)
+                        except: decoded_data = f"BYTES[{len(data)}]"
+                    
+                    # Discovery: Log any event that might be auth-related
+                    ev_lower = event.lower()
+                    if any(x in ev_lower for x in ["auth", "success", "error", "fail", "kick", "stream"]):
+                         logger.info(f"🔑 CRITICAL EVENT: '{event}' | Data: {str(decoded_data)[:500]}")
+                    else:
+                        logger.info(f"🔔 RAW SIO: '{event}' | Data Tip: {str(decoded_data)[:100]}")
         except Exception: pass
 
         @self.client.on.success_auth
