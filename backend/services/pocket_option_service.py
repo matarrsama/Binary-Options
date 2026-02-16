@@ -57,10 +57,13 @@ class PocketOptionService:
                 "isOptimized": True,
             }
             
-            # Pass auth model to connect method for handshake authentication
+            # Pass auth data to connect method for handshake authentication
+            # We MUST dump the model to a dict because the library/socketio 
+            # does not automatically serialize Pydantic models in the connect handler.
             auth_model = AuthorizationData.model_validate(auth_data)
+            auth_dict = auth_model.model_dump(mode='json', by_alias=True)
             
-            await self.client.connect(url=region, auth=auth_model)
+            await self.client.connect(url=region, auth=auth_dict)
             logger.info("WebSocket handshake initiated with credentials")
             
         except Exception as e:
