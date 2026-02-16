@@ -58,10 +58,13 @@ class PocketOptionService:
             }
             
             # Pass auth data to connect method for handshake authentication
-            # We MUST dump the model to a dict because the library/socketio 
-            # does not automatically serialize Pydantic models in the connect handler.
+            # VERSION STAMP: 2026-02-16-v2 (Handshake Dict Fix)
             auth_model = AuthorizationData.model_validate(auth_data)
             auth_dict = auth_model.model_dump(mode='json', by_alias=True)
+            
+            logger.info(f"Connecting with Auth Dict (Type: {type(auth_dict).__name__})")
+            if not isinstance(auth_dict, dict):
+                logger.error(f"FATAL: auth_dict is not a dictionary! Type found: {type(auth_dict)}")
             
             await self.client.connect(url=region, auth=auth_dict)
             logger.info("WebSocket handshake initiated with credentials")
