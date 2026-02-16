@@ -47,13 +47,24 @@ class PocketOptionService:
             
             logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
-            # Prepare credentials log safety
-            ssid_masked = f"{Config.POCKET_OPTION_SSID[:5]}...{Config.POCKET_OPTION_SSID[-5:]}" if Config.POCKET_OPTION_SSID else "MISSING"
-            logger.info(f"Connecting V5: SSID={ssid_masked}, UID={Config.POCKET_OPTION_UID}, isDemo={Config.POCKET_OPTION_IS_DEMO}")
+            # VERSION STAMP: 2026-02-16-v8 (Universal Auth Alignment)
+            # Strategy: Pass raw DICT to connect() to avoid model serialization crash
+            # Triple-bagging the token fields for absolute coverage
+            raw_auth = {
+                "session": Config.POCKET_OPTION_SSID,
+                "sessionToken": Config.POCKET_OPTION_SSID,
+                "token": Config.POCKET_OPTION_SSID,
+                "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
+                "uid": str(Config.POCKET_OPTION_UID),
+                "platform": 2,
+                "lang": "en",
+                "isFastHistory": True,
+                "isOptimized": True,
+            }
             
-            # Pattern: Use connect(url) with no auth in handshake as per official docs
-            await self.client.connect(url=region)
-            logger.info(f"✅ WebSocket connection initiated to {region}")
+            # Pattern: Handshake Auth (DICT) + No crash
+            await self.client.connect(url=region, auth=raw_auth)
+            logger.info(f"✅ WebSocket connection + Handshake initiated to {region} (V8)")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -67,38 +78,37 @@ class PocketOptionService:
 
         @self.client.on.connect
         async def on_connect(data: None):
-            """Handle connection event - V7 Direct Raw Auth"""
+            """Handle connection event - V8 Triple-Bagged Fallback"""
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
             try:
-                # V7 STRATEGY: Bypass the library's auth() method.
-                # The browser confirmed it wants "sessionToken" and a string "uid".
+                # V8 STRATEGY: Send EVERYTHING. 
+                # Browser confirmed "sessionToken" + string "uid".
+                # Official SDK example says "session" + numeric uid.
+                # We send both.
                 raw_auth_payload = {
+                    "session": Config.POCKET_OPTION_SSID,
                     "sessionToken": Config.POCKET_OPTION_SSID,
+                    "token": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
-                    "uid": str(Config.POCKET_OPTION_UID), # String as per browser capture
+                    "uid": str(Config.POCKET_OPTION_UID), 
                     "platform": 2,
-                    "lang": "en", # Added as per browser capture
+                    "lang": "en",
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
                 
-                # VERSION STAMP: 2026-02-16-v7 (Direct Raw Auth + String UID + sessionToken)
-                logger.info(f"🚀 Emitting V7 Direct Auth (UID={Config.POCKET_OPTION_UID})...")
+                logger.info(f"🚀 Emitting V8 Triple-Auth (UID={Config.POCKET_OPTION_UID})...")
                 
-                # Use underlying SIO for raw control
+                # Use underlying SIO for raw control backup
                 sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
                 if sio:
                     await sio.emit("auth", raw_auth_payload)
-                    logger.info("📡 Raw 'auth' emission sent via SIO.")
-                else:
-                    # Fallback to model if SIO is unreachable (shouldn't happen)
-                    from pocket_option.models import AuthorizationData
-                    await self.client.emit.auth(AuthorizationData.model_validate(raw_auth_payload))
+                    logger.info("📡 V8 Raw 'auth' emission sent via SIO.")
                 
             except Exception as e:
-                logger.error(f"❌ Auth emission failed: {e}")
+                logger.error(f"❌ V8 Auth emission failed: {e}")
 
         # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V4
         try:
