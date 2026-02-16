@@ -67,29 +67,35 @@ class PocketOptionService:
 
         @self.client.on.connect
         async def on_connect(data: None):
-            """Handle connection event - V6 Alignment"""
+            """Handle connection event - V7 Direct Raw Auth"""
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
             try:
-                # Diagnostic: Inspect model fields to see if 'session' or 'sessionToken' is the true field
-                fields = AuthorizationData.model_fields.keys()
-                logger.info(f"🔍 AuthorizationData fields: {list(fields)}")
-                
-                auth_data = {
-                    "session": Config.POCKET_OPTION_SSID,
-                    "sessionToken": Config.POCKET_OPTION_SSID, # Double-bagging for compatibility
+                # V7 STRATEGY: Bypass the library's auth() method.
+                # The browser confirmed it wants "sessionToken" and a string "uid".
+                raw_auth_payload = {
+                    "sessionToken": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
-                    "uid": Config.POCKET_OPTION_UID,
-                    "platform": 2, 
+                    "uid": str(Config.POCKET_OPTION_UID), # String as per browser capture
+                    "platform": 2,
+                    "lang": "en", # Added as per browser capture
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
                 
-                # VERSION STAMP: 2026-02-16-v6 (Token Alignment + Field Diagnostics)
-                logger.info(f"🚀 Emitting V6 Auth (UID={Config.POCKET_OPTION_UID})...")
-                model = AuthorizationData.model_validate(auth_data)
-                await self.client.emit.auth(model)
+                # VERSION STAMP: 2026-02-16-v7 (Direct Raw Auth + String UID + sessionToken)
+                logger.info(f"🚀 Emitting V7 Direct Auth (UID={Config.POCKET_OPTION_UID})...")
+                
+                # Use underlying SIO for raw control
+                sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
+                if sio:
+                    await sio.emit("auth", raw_auth_payload)
+                    logger.info("📡 Raw 'auth' emission sent via SIO.")
+                else:
+                    # Fallback to model if SIO is unreachable (shouldn't happen)
+                    from pocket_option.models import AuthorizationData
+                    await self.client.emit.auth(AuthorizationData.model_validate(raw_auth_payload))
                 
             except Exception as e:
                 logger.error(f"❌ Auth emission failed: {e}")
