@@ -47,10 +47,22 @@ class PocketOptionService:
             
             logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
-            # VERSION STAMP: 2026-02-16-v9 (Atomic Debug & Log Expansion)
-            # Pattern: No auth in handshake to avoid protocol interference
-            await self.client.connect(url=region)
-            logger.info(f"✅ WebSocket connection initiated to {region} (V9)")
+            # VERSION STAMP: 2026-02-16-v10 (Full Browser Fingerprint - Hail Mary)
+            # Strategy: Inject institutional-grade browser headers to bypass shadow-blocking
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Origin": "https://pocketoption.com",
+                "Referer": "https://pocketoption.com/",
+                "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Mode": "websocket",
+                "Sec-Fetch-Site": "same-site",
+                "Sec-Fetch-Dest": "empty"
+            }
+            
+            logger.info("📡 Handshaking with Full Browser Fingerprint (V10)...")
+            await self.client.connect(url=region, headers=headers)
+            logger.info(f"✅ WebSocket connection + Fingerprint initiated to {region}")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
