@@ -35,18 +35,36 @@ class PocketOptionService:
         self._setup_event_handlers()
     
     async def connect(self):
-        """Connect to Pocket Option WebSocket"""
+        """Connect to Pocket Option WebSocket with handshake auth"""
         if self.is_connected:
-            logger.info("Already connected, skipping...")
             return
             
         try:
-            logger.info("Connecting to Pocket Option...")
-            # Use demo region for all connections, auth determines account type
-            await self.client.connect(Regions.DEMO)
-            logger.info("WebSocket connection handshake initiated")
+            # Select region based on demo flag
+            # Regions.DEMO = wss://demo-api-eu.po.market
+            # Regions.EUROPA = wss://api-eu.po.market
+            region = Regions.DEMO if Config.POCKET_OPTION_IS_DEMO else Regions.EUROPA
+            
+            logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
+            
+            # Prepare handshake auth data
+            auth_data = {
+                "session": Config.POCKET_OPTION_SSID,
+                "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
+                "uid": Config.POCKET_OPTION_UID,
+                "platform": 2, # Try 2 (web), fallback to 1 as diagnostic if this fails
+                "isFastHistory": True,
+                "isOptimized": True,
+            }
+            
+            # Pass auth model to connect method for handshake authentication
+            auth_model = AuthorizationData.model_validate(auth_data)
+            
+            await self.client.connect(url=region, auth=auth_model)
+            logger.info("WebSocket handshake initiated with credentials")
+            
         except Exception as e:
-            logger.error(f"Failed to initiate Pocket Option connection: {e}")
+            logger.error(f"Failed to initiate connection: {e}")
             await self._handle_reconnection()
 
     def _setup_event_handlers(self):
@@ -59,33 +77,13 @@ class PocketOptionService:
         async def on_connect(data: None):
             """Handle connection event"""
             if self._auth_sent:
-                logger.info("🔄 Duplicate connect event - ignoring to prevent auth storm")
+                logger.info("🔄 Re-connect event received")
                 return
                 
-            logger.info("✅ WebSocket connected - Authenticating...")
+            logger.info("✅ WebSocket connected and authorized via handshake")
             self.is_connected = True
             self._auth_sent = True
-            
-            try:
-                # Log state for debugging
-                raw_demo_env = os.getenv('POCKET_OPTION_IS_DEMO')
-                logger.info(f"DEBUG: POCKET_OPTION_IS_DEMO='{raw_demo_env}'")
-                logger.info(f"Config isDemo: {Config.POCKET_OPTION_IS_DEMO}")
-                
-                auth_data = {
-                    "session": Config.POCKET_OPTION_SSID,
-                    "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
-                    "uid": Config.POCKET_OPTION_UID,
-                    "platform": 2, 
-                    "isFastHistory": True,
-                    "isOptimized": True,
-                }
-                
-                await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
-                logger.info(f"🚀 Auth request emitted (UID={auth_data['uid']}, isDemo={auth_data['isDemo']})")
-            except Exception as e:
-                logger.error(f"❌ Auth mission failed: {e}")
-                self._auth_sent = False # allow retry
+            # Note: auth emission is skipped here as it's now in the connect handshake
         
         # Hook underlying Socket.IO for raw diagnostics
         try:
