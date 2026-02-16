@@ -67,21 +67,30 @@ class PocketOptionService:
 
         @self.client.on.connect
         async def on_connect(data: None):
-            """Handle connection event - Official Auth Pattern"""
+            """Handle connection event - V6 Alignment"""
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
             try:
+                # Diagnostic: Inspect model fields to see if 'session' or 'sessionToken' is the true field
+                fields = AuthorizationData.model_fields.keys()
+                logger.info(f"🔍 AuthorizationData fields: {list(fields)}")
+                
                 auth_data = {
                     "session": Config.POCKET_OPTION_SSID,
+                    "sessionToken": Config.POCKET_OPTION_SSID, # Double-bagging for compatibility
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                     "uid": Config.POCKET_OPTION_UID,
-                    "platform": 2, # Standard Web platform
+                    "platform": 2, 
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
-                logger.info("🚀 Emitting auth payload (Official Doc Pattern)...")
-                await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
+                
+                # VERSION STAMP: 2026-02-16-v6 (Token Alignment + Field Diagnostics)
+                logger.info(f"🚀 Emitting V6 Auth (UID={Config.POCKET_OPTION_UID})...")
+                model = AuthorizationData.model_validate(auth_data)
+                await self.client.emit.auth(model)
+                
             except Exception as e:
                 logger.error(f"❌ Auth emission failed: {e}")
 
