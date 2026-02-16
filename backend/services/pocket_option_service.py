@@ -48,26 +48,25 @@ class PocketOptionService:
             logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
             # Prepare handshake auth data
+            # Mask sensitive data for log safety
+            ssid_masked = f"{Config.POCKET_OPTION_SSID[:5]}...{Config.POCKET_OPTION_SSID[-5:]}" if Config.POCKET_OPTION_SSID else "MISSING"
+            logger.info(f"Diagnostic: SSID={ssid_masked}, UID={Config.POCKET_OPTION_UID}, isDemo={Config.POCKET_OPTION_IS_DEMO}")
+            
             auth_data = {
                 "session": Config.POCKET_OPTION_SSID,
                 "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                 "uid": Config.POCKET_OPTION_UID,
-                "platform": 2, # Try 2 (web), fallback to 1 as diagnostic if this fails
+                "platform": 1, # Switched to 1 (older but stable API platform ID)
                 "isFastHistory": True,
                 "isOptimized": True,
             }
             
-            # Pass auth data to connect method for handshake authentication
-            # VERSION STAMP: 2026-02-16-v2 (Handshake Dict Fix)
+            # VERSION STAMP: 2026-02-16-v3 (Handshake + Post-Connect Fallback)
             auth_model = AuthorizationData.model_validate(auth_data)
             auth_dict = auth_model.model_dump(mode='json', by_alias=True)
             
-            logger.info(f"Connecting with Auth Dict (Type: {type(auth_dict).__name__})")
-            if not isinstance(auth_dict, dict):
-                logger.error(f"FATAL: auth_dict is not a dictionary! Type found: {type(auth_dict)}")
-            
             await self.client.connect(url=region, auth=auth_dict)
-            logger.info("WebSocket handshake initiated with credentials")
+            logger.info(f"✅ WebSocket handshake initiated (Platform 1, isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -82,23 +81,32 @@ class PocketOptionService:
         @self.client.on.connect
         async def on_connect(data: None):
             """Handle connection event"""
-            if self._auth_sent:
-                logger.info("🔄 Re-connect event received")
-                return
-                
-            logger.info("✅ WebSocket connected and authorized via handshake")
+            logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
-            self._auth_sent = True
-            # Note: auth emission is skipped here as it's now in the connect handshake
-        
-        # Hook underlying Socket.IO for raw diagnostics
+            
+            # Fallback: Emitting auth manually after connect just in case handshake auth was ignored
+            try:
+                auth_data = {
+                    "session": Config.POCKET_OPTION_SSID,
+                    "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
+                    "uid": Config.POCKET_OPTION_UID,
+                    "platform": 1,
+                    "isFastHistory": True,
+                    "isOptimized": True,
+                }
+                logger.info("🚀 Emitting manual auth fallback after connection...")
+                await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
+            except Exception as e:
+                logger.error(f"❌ Manual auth fallback failed: {e}")
+
+        # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V3
         try:
             sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
             if sio:
                 @sio.on('*')
                 async def catch_all(event, data):
-                    if event not in ['updateAssets', 'update_assets', 'connect', 'disconnect']:
-                        logger.info(f"🔔 RAW SIO: '{event}' | Data: {str(data)[:200]}")
+                    # Show EVERYTHING to identify hidden protocol messages
+                    logger.info(f"🔔 RAW SIO: '{event}' | Data: {str(data)[:500]}")
         except Exception: pass
 
         @self.client.on.success_auth
