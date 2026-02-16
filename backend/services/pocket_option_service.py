@@ -47,24 +47,10 @@ class PocketOptionService:
             
             logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
-            # VERSION STAMP: 2026-02-16-v8 (Universal Auth Alignment)
-            # Strategy: Pass raw DICT to connect() to avoid model serialization crash
-            # Triple-bagging the token fields for absolute coverage
-            raw_auth = {
-                "session": Config.POCKET_OPTION_SSID,
-                "sessionToken": Config.POCKET_OPTION_SSID,
-                "token": Config.POCKET_OPTION_SSID,
-                "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
-                "uid": str(Config.POCKET_OPTION_UID),
-                "platform": 2,
-                "lang": "en",
-                "isFastHistory": True,
-                "isOptimized": True,
-            }
-            
-            # Pattern: Handshake Auth (DICT) + No crash
-            await self.client.connect(url=region, auth=raw_auth)
-            logger.info(f"✅ WebSocket connection + Handshake initiated to {region} (V8)")
+            # VERSION STAMP: 2026-02-16-v9 (Atomic Debug & Log Expansion)
+            # Pattern: No auth in handshake to avoid protocol interference
+            await self.client.connect(url=region)
+            logger.info(f"✅ WebSocket connection initiated to {region} (V9)")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -78,19 +64,15 @@ class PocketOptionService:
 
         @self.client.on.connect
         async def on_connect(data: None):
-            """Handle connection event - V8 Triple-Bagged Fallback"""
+            """Handle connection event - V9 Atomic Auth"""
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
             try:
-                # V8 STRATEGY: Send EVERYTHING. 
-                # Browser confirmed "sessionToken" + string "uid".
-                # Official SDK example says "session" + numeric uid.
-                # We send both.
+                # V9 STRATEGY: One single, clean payload matching browser exactly.
+                # No triple-bagging, no handshake.
                 raw_auth_payload = {
-                    "session": Config.POCKET_OPTION_SSID,
                     "sessionToken": Config.POCKET_OPTION_SSID,
-                    "token": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                     "uid": str(Config.POCKET_OPTION_UID), 
                     "platform": 2,
@@ -99,36 +81,31 @@ class PocketOptionService:
                     "isOptimized": True,
                 }
                 
-                logger.info(f"🚀 Emitting V8 Triple-Auth (UID={Config.POCKET_OPTION_UID})...")
+                logger.info(f"🚀 Emitting V9 Atomic Auth (UID={Config.POCKET_OPTION_UID})...")
                 
                 # Use underlying SIO for raw control backup
                 sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
                 if sio:
                     await sio.emit("auth", raw_auth_payload)
-                    logger.info("📡 V8 Raw 'auth' emission sent via SIO.")
+                    logger.info("📡 V9 Atomic 'auth' emission sent via SIO.")
                 
             except Exception as e:
-                logger.error(f"❌ V8 Auth emission failed: {e}")
+                logger.error(f"❌ V9 Auth emission failed: {e}")
 
-        # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V4
+        # Hook underlying Socket.IO for total diagnostics
         try:
             import json as json_lib
             sio = getattr(self.client, '_sio', None) or getattr(self.client, 'sio', None)
             if sio:
                 @sio.on('*')
                 async def catch_all(event, data):
-                    # Robust data handling for bytes vs dict
+                    # ALL EVENTS logging in V9
                     decoded_data = data
                     if isinstance(data, (bytes, bytearray)):
                         try: decoded_data = json_lib.loads(data)
                         except: decoded_data = f"BYTES[{len(data)}]"
                     
-                    # Discovery: Log any event that might be auth-related
-                    ev_lower = event.lower()
-                    if any(x in ev_lower for x in ["auth", "success", "error", "fail", "kick", "stream"]):
-                         logger.info(f"🔑 CRITICAL EVENT: '{event}' | Data: {str(decoded_data)[:500]}")
-                    else:
-                        logger.info(f"🔔 RAW SIO: '{event}' | Data Tip: {str(decoded_data)[:100]}")
+                    logger.info(f"� [DEBUG V9] Event: '{event}' | Data: {str(decoded_data)[:1000]}")
         except Exception: pass
 
         @self.client.on.success_auth
