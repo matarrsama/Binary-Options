@@ -47,26 +47,13 @@ class PocketOptionService:
             
             logger.info(f"Connecting to Pocket Option Region: {region} (isDemo={Config.POCKET_OPTION_IS_DEMO})")
             
-            # Prepare handshake auth data
-            # Mask sensitive data for log safety
+            # Prepare credentials log safety
             ssid_masked = f"{Config.POCKET_OPTION_SSID[:5]}...{Config.POCKET_OPTION_SSID[-5:]}" if Config.POCKET_OPTION_SSID else "MISSING"
-            logger.info(f"Diagnostic: SSID={ssid_masked}, UID={Config.POCKET_OPTION_UID}, isDemo={Config.POCKET_OPTION_IS_DEMO}")
+            logger.info(f"Connecting V5: SSID={ssid_masked}, UID={Config.POCKET_OPTION_UID}, isDemo={Config.POCKET_OPTION_IS_DEMO}")
             
-            auth_data = {
-                "session": Config.POCKET_OPTION_SSID,
-                "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
-                "uid": Config.POCKET_OPTION_UID,
-                "platform": 2, # Reverting to 2 (Standard Web) for V4
-                "isFastHistory": True,
-                "isOptimized": True,
-            }
-            
-            # VERSION STAMP: 2026-02-16-v4 (Handshake + Post-Connect + Platform 2)
-            auth_model = AuthorizationData.model_validate(auth_data)
-            auth_dict = auth_model.model_dump(mode='json', by_alias=True)
-            
-            await self.client.connect(url=region, auth=auth_dict)
-            logger.info(f"✅ WebSocket handshake initiated (Platform 2, isDemo={Config.POCKET_OPTION_IS_DEMO})")
+            # Pattern: Use connect(url) with no auth in handshake as per official docs
+            await self.client.connect(url=region)
+            logger.info(f"✅ WebSocket connection initiated to {region}")
             
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -80,24 +67,23 @@ class PocketOptionService:
 
         @self.client.on.connect
         async def on_connect(data: None):
-            """Handle connection event"""
+            """Handle connection event - Official Auth Pattern"""
             logger.info(f"✅ WebSocket connected. Handshake data: {data}")
             self.is_connected = True
             
-            # Fallback: Emitting auth manually after connect
             try:
                 auth_data = {
                     "session": Config.POCKET_OPTION_SSID,
                     "isDemo": 1 if Config.POCKET_OPTION_IS_DEMO else 0,
                     "uid": Config.POCKET_OPTION_UID,
-                    "platform": 2, # Match handshake platform
+                    "platform": 2, # Standard Web platform
                     "isFastHistory": True,
                     "isOptimized": True,
                 }
-                logger.info("🚀 Emitting manual auth fallback after connection...")
+                logger.info("🚀 Emitting auth payload (Official Doc Pattern)...")
                 await self.client.emit.auth(AuthorizationData.model_validate(auth_data))
             except Exception as e:
-                logger.error(f"❌ Manual auth fallback failed: {e}")
+                logger.error(f"❌ Auth emission failed: {e}")
 
         # Hook underlying Socket.IO for raw diagnostics - NO FILTERING in V4
         try:
@@ -125,7 +111,16 @@ class PocketOptionService:
             """Handle successful authentication"""
             logger.info(f"🎉 AUTH SUCCESS! ID: {data.id}")
             self.reconnect_attempts = 0
-            # Subscribe ONLY after auth is confirmed
+            
+            # Initialize session loaders as per official example
+            try:
+                await self.client.emit.indicator_load()
+                await self.client.emit.favorite_load()
+                await self.client.emit.price_alert_load()
+            except Exception as e:
+                logger.warning(f"Metadata load failed: {e}")
+                
+            # Subscribe after initialization
             await self.subscribe_to_markets()
 
         @self.client.on.update_close_value
@@ -160,45 +155,49 @@ class PocketOptionService:
             await self._handle_reconnection()
 
     async def subscribe_to_markets(self):
-        """Subscribe to all available market pairs"""
+        """Subscribe to all available market pairs and activate their streams"""
         try:
             if not self.is_connected:
                 logger.warning("Cannot subscribe: not connected")
                 return
             
-            # Wait a moment for auth to be processed on server side
-            await asyncio.sleep(2)
+            # Wait for auth and metadata loaders to settle
+            await asyncio.sleep(3)
             
-            # Map of common asset names to Asset enum values
-            asset_mapping = {
-                "EURUSD_otc": Asset.EURUSD_otc,
-                "GBPUSD_otc": Asset.GBPUSD_otc,
-                "USDJPY_otc": Asset.USDJPY_otc,
-                "AUDUSD_otc": Asset.AUDUSD_otc,
-                "USDCAD_otc": Asset.USDCAD_otc,
-                "EURJPY_otc": Asset.EURJPY_otc,
-                "GBPJPY_otc": Asset.GBPJPY_otc,
-                "EURGBP_otc": Asset.EURGBP_otc,
-                "AUDJPY_otc": Asset.AUDJPY_otc,
-                "NZDUSD_otc": Asset.NZDUSD_otc,
-            }
+            # Use specific assets from enum for safety
+            from pocket_option.models import ChangeAssetRequest
             
-            logger.info(f"Subscribing to {len(asset_mapping)} market pairs...")
+            # Focused list for testing stabilization
+            asset_list = [
+                Asset.EURUSD_otc, Asset.GBPUSD_otc, Asset.USDJPY_otc,
+                Asset.AUDUSD_otc, Asset.USDCAD_otc, Asset.EURJPY_otc,
+                Asset.GBPJPY_otc, Asset.EURGBP_otc, Asset.AUDJPY_otc,
+                Asset.NZDUSD_otc
+            ]
             
-            for asset_name, asset_enum in asset_mapping.items():
+            logger.info(f"Subscribing to {len(asset_list)} market pairs...")
+            
+            for asset in asset_list:
                 try:
-                    # Attempt subscription using the raw value (string) as well as the enum
-                    # Some versions of the API/library prefer strings
-                    asset_value = asset_enum.value if hasattr(asset_enum, 'value') else str(asset_enum)
+                    asset_name = asset.name if hasattr(asset, 'name') else str(asset)
+                    logger.info(f"Activating {asset_name}...")
                     
-                    logger.info(f"Attempting subscription to {asset_name} (value: {asset_value})")
-                    await self.client.emit.subscribe_to_asset(asset_enum)
+                    # 1. Subscribe to the symbol
+                    await self.client.emit.subscribe_to_asset(asset)
+                    
+                    # 2. Change to the asset to trigger stream (Mandatory in some SDK versions)
+                    await self.client.emit.change_asset(ChangeAssetRequest(asset=asset, period=60))
+                    
+                    # 3. Market sentiment (Optional but useful for data flow)
+                    await self.client.emit.subscribe_for_market_sentiment(asset)
+                    
                     self.subscribed_assets.add(asset_name)
-                    logger.info(f"✅ Subscribed to {asset_name}")
+                    logger.info(f"✅ Protocol sequence completed for {asset_name}")
+                    
                 except Exception as e:
-                    logger.warning(f"❌ Failed to subscribe to {asset_name}: {e}")
+                    logger.warning(f"❌ Failed to activate {asset}: {e}")
             
-            logger.info(f"Successfully initiated subscription for {len(self.subscribed_assets)} market pairs")
+            logger.info(f"Successfully initiated V5 protocol for {len(self.subscribed_assets)} assets")
             
         except Exception as e:
             logger.error(f"Failed to subscribe to markets: {e}")
