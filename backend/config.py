@@ -3,6 +3,7 @@ Configuration management for the backend service.
 Loads and validates environment variables.
 """
 import os
+import urllib.parse
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -13,7 +14,9 @@ class Config:
     """Application configuration"""
     
     # Pocket Option Configuration
-    POCKET_OPTION_SSID = os.getenv('POCKET_OPTION_SSID', '').strip()
+    _raw_ssid = os.getenv('POCKET_OPTION_SSID', '').strip()
+    # Automatically decode if the user pasted a URL-encoded string (containing %3A, etc)
+    POCKET_OPTION_SSID = urllib.parse.unquote(_raw_ssid)
     POCKET_OPTION_UID = int(os.getenv('POCKET_OPTION_UID', '0'))
     # Log raw value for diagnostics
     _raw_is_demo = os.getenv('POCKET_OPTION_IS_DEMO', '1').strip()
