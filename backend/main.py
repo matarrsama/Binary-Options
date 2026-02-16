@@ -77,10 +77,8 @@ class MarketDataService:
             await self.health_server.start()
             
             # Connect to Pocket Option
+            # The service will handle authentication and subscription automatically on connect
             await self.pocket_option_service.connect()
-            
-            # Subscribe to all markets
-            await self.pocket_option_service.subscribe_to_markets()
             
             self.is_running = True
             logger.info("Market Data Service started successfully")
